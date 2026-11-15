@@ -136,7 +136,16 @@ class AlarmApiImpl(private val context: Context) : AlarmApi {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
                 ?: throw IllegalStateException("AlarmManager not available")
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // KinFami fork: without "Alarms & reminders" (SCHEDULE_EXACT_ALARM not granted,
+            // USE_EXACT_ALARM removed) an exact alarm would throw and be lost; set an
+            // inexact alarm instead so the reminder still rings (possibly a few minutes late).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerTime,
