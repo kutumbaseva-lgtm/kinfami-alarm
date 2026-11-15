@@ -2,6 +2,8 @@ package com.gdelataillade.alarm.services
 
 import android.content.Context
 import android.media.MediaPlayer
+import android.os.Handler
+import android.os.Looper
 import java.util.concurrent.ConcurrentHashMap
 import java.util.Timer
 import java.util.TimerTask
@@ -10,6 +12,9 @@ import io.flutter.Log
 class AudioService(private val context: Context) {
     private val mediaPlayers = ConcurrentHashMap<Int, MediaPlayer>()
     private val timers = ConcurrentHashMap<Int, Timer>()
+    // KinFami fork: pending "play again" steps per alarm id (cancelled by stopAudio).
+    private val repeatHandler = Handler(Looper.getMainLooper())
+    private val pendingRepeats = ConcurrentHashMap<Int, Runnable>()
 
     private var onAudioComplete: (() -> Unit)? = null
 
@@ -25,7 +30,14 @@ class AudioService(private val context: Context) {
         return mediaPlayers.filter { (_, mediaPlayer) -> mediaPlayer.isPlaying }.keys.toList()
     }
 
-    fun playAudio(id: Int, filePath: String, loopAudio: Boolean, fadeDuration: Double?) {
+    fun playAudio(
+        id: Int,
+        filePath: String,
+        loopAudio: Boolean,
+        fadeDuration: Double?,
+        repeatCount: Int = 1,
+        repeatGapMs: Long = 0L
+    ) {
         stopAudio(id) // Stop and release any existing MediaPlayer and Timer for this ID
 
         val baseAppFlutterPath = (context.filesDir.parent ?: "") + "/app_flutter/"
@@ -59,8 +71,26 @@ class AudioService(private val context: Context) {
                 isLooping = loopAudio
                 start()
 
-                setOnCompletionListener {
-                    if (!loopAudio) {
+                // KinFami fork: play [repeatCount] times with [repeatGapMs] in between; only
+                // the last play reports completion. Stop/Done cancels the pending replay.
+                var played = 1
+                setOnCompletionListener { player ->
+                    if (!loopAudio && played < repeatCount) {
+                        played++
+                        val replay = Runnable {
+                            pendingRepeats.remove(id)
+                            try {
+                                if (mediaPlayers[id] === player) {
+                                    player.seekTo(0)
+                                    player.start()
+                                }
+                            } catch (e: Exception) {
+                                Log.e("AudioService", "Error repeating audio: $e")
+                            }
+                        }
+                        pendingRepeats[id] = replay
+                        repeatHandler.postDelayed(replay, repeatGapMs)
+                    } else if (!loopAudio) {
                         onAudioComplete?.invoke()
                     }
                 }
@@ -80,6 +110,7 @@ class AudioService(private val context: Context) {
     }
 
     fun stopAudio(id: Int) {
+        pendingRepeats.remove(id)?.let { repeatHandler.removeCallbacks(it) }
         timers[id]?.cancel()
         timers.remove(id)
 
@@ -120,6 +151,8 @@ class AudioService(private val context: Context) {
     }
 
     fun cleanUp() {
+        pendingRepeats.values.forEach { repeatHandler.removeCallbacks(it) }
+        pendingRepeats.clear()
         timers.values.forEach(Timer::cancel)
         timers.clear()
 

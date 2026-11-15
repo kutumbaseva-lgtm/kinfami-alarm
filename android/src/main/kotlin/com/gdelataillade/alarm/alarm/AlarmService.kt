@@ -19,7 +19,9 @@ import android.os.PowerManager
 import android.os.Build
 import com.gdelataillade.alarm.services.AlarmRingingLiveData
 import com.gdelataillade.alarm.services.NotificationHandler
+import com.gdelataillade.alarm.api.AlarmApiImpl
 import io.flutter.Log
+import java.util.Date
 
 class AlarmService : Service() {
     private var audioService: AudioService? = null
@@ -30,6 +32,12 @@ class AlarmService : Service() {
     companion object {
         @JvmStatic
         var ringingAlarmIds: List<Int> = listOf()
+
+        // KinFami fork: snoozed alarms use the alarm id with this bit set.
+        const val SNOOZE_BIT = 0x40000000
+        // KinFami fork: "Done" notes for the app (read by Flutter's SharedPreferences as
+        // key "kinfami_alarm_done").
+        const val DONE_KEY = "flutter.kinfami_alarm_done"
     }
 
     override fun onCreate() {
@@ -50,6 +58,47 @@ class AlarmService : Service() {
         val action = intent.getStringExtra(AlarmReceiver.EXTRA_ALARM_ACTION)
 
         if (action == "STOP_ALARM" && id != 0) {
+            unsaveAlarm(id)
+            return START_NOT_STICKY
+        }
+
+        // KinFami fork: Snooze — stop this ring and set the same alarm again in N minutes
+        // under the snooze id (id with bit 30 set), saved so it survives a reboot. Works
+        // with the app closed (no Flutter needed).
+        if (action == "SNOOZE_ALARM" && id != 0) {
+            val storage = AlarmStorage(this)
+            val saved = storage.getSavedAlarms().firstOrNull { it.id == id }
+            // Stop and forget the ringing alarm first: a snoozed alarm snoozed again keeps
+            // the same id, so saving before this would be undone.
+            unsaveAlarm(id)
+            if (saved != null) {
+                val minutes = (saved.notificationSettings.snoozeMinutes ?: 10L).coerceIn(1L, 120L)
+                val snoozed = saved.copy(
+                    id = id or SNOOZE_BIT,
+                    dateTime = Date(System.currentTimeMillis() + minutes * 60_000L)
+                )
+                storage.saveAlarm(snoozed)
+                AlarmApiImpl(this).setAlarm(snoozed)
+            }
+            return START_NOT_STICKY
+        }
+
+        // KinFami fork: Done — stop this ring, cancel a pending snooze of it, and leave a note
+        // ("tag|time") for the app, which marks the reminder done the next time it runs.
+        if (action == "DONE_ALARM" && id != 0) {
+            val storage = AlarmStorage(this)
+            val saved = storage.getSavedAlarms().firstOrNull { it.id == id }
+            val snoozeId = id or SNOOZE_BIT
+            if (snoozeId != id) {
+                AlarmApiImpl(this).stopAlarm(snoozeId.toLong())
+                storage.unsaveAlarm(snoozeId)
+            }
+            val tag = saved?.notificationSettings?.tag
+            if (tag != null) {
+                val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                val old = prefs.getString(DONE_KEY, "") ?: ""
+                prefs.edit().putString(DONE_KEY, old + tag + "|" + System.currentTimeMillis() + "\n").apply()
+            }
             unsaveAlarm(id)
             return START_NOT_STICKY
         }
@@ -142,7 +191,10 @@ class AlarmService : Service() {
         }
 
         // Play the alarm audio
-        audioService?.playAudio(id, assetAudioPath, loopAudio, fadeDuration)
+        // KinFami fork: play the sound N times with a pause in between.
+        val repeatCount = (notificationSettings.repeatCount ?: 1L).toInt().coerceIn(1, 5)
+        val repeatGapMs = (notificationSettings.repeatGapMs ?: 0L).coerceIn(0L, 60_000L)
+        audioService?.playAudio(id, assetAudioPath, loopAudio, fadeDuration, repeatCount, repeatGapMs)
 
         // Update the list of ringing alarms
         ringingAlarmIds = audioService?.getPlayingMediaPlayersIds() ?: listOf()

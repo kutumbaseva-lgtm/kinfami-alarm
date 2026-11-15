@@ -9,6 +9,9 @@ import android.os.Build
 class AlarmReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_ALARM_STOP = "com.gdelataillade.alarm.ACTION_STOP"
+        // KinFami fork: notification buttons Snooze and Done.
+        const val ACTION_ALARM_SNOOZE = "com.gdelataillade.alarm.ACTION_SNOOZE"
+        const val ACTION_ALARM_DONE = "com.gdelataillade.alarm.ACTION_DONE"
         const val EXTRA_ALARM_ACTION = "EXTRA_ALARM_ACTION"
     }
 
@@ -16,6 +19,10 @@ class AlarmReceiver : BroadcastReceiver() {
         val action = intent.action
         if (action == ACTION_ALARM_STOP) {
             intent.putExtra(EXTRA_ALARM_ACTION, "STOP_ALARM")
+        } else if (action == ACTION_ALARM_SNOOZE) {
+            intent.putExtra(EXTRA_ALARM_ACTION, "SNOOZE_ALARM")
+        } else if (action == ACTION_ALARM_DONE) {
+            intent.putExtra(EXTRA_ALARM_ACTION, "DONE_ALARM")
         }
 
         // Start Alarm Service

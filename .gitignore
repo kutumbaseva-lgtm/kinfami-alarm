@@ -1,0 +1,17 @@
+# Generated / machine-specific files (never publish)
+.dart_tool/
+pubspec.lock
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.env
+.env*
+local.properties
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/GeneratedPluginRegistrant.*
+example/pubspec.lock
+*.jks
+*.keystore
+key.properties

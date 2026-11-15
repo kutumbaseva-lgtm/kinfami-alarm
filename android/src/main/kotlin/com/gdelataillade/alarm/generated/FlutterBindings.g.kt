@@ -239,7 +239,19 @@ data class NotificationSettingsWire (
    * If `null`, the default app icon will be used.
    * Defaults to `null`.
    */
-  val icon: String? = null
+  val icon: String? = null,
+  /** KinFami fork: Snooze button text (null = no button). */
+  val snoozeButton: String? = null,
+  /** KinFami fork: Done button text (null = no button). */
+  val doneButton: String? = null,
+  /** KinFami fork: snooze length in minutes. */
+  val snoozeMinutes: Long? = null,
+  /** KinFami fork: how many times the sound plays. */
+  val repeatCount: Long? = null,
+  /** KinFami fork: pause between plays in milliseconds. */
+  val repeatGapMs: Long? = null,
+  /** KinFami fork: app tag reported back when Done is pressed. */
+  val tag: String? = null
 )
  {
   companion object {
@@ -248,7 +260,14 @@ data class NotificationSettingsWire (
       val body = pigeonVar_list[1] as String
       val stopButton = pigeonVar_list[2] as String?
       val icon = pigeonVar_list[3] as String?
-      return NotificationSettingsWire(title, body, stopButton, icon)
+      val snoozeButton = pigeonVar_list.getOrNull(4) as String?
+      val doneButton = pigeonVar_list.getOrNull(5) as String?
+      val snoozeMinutes = (pigeonVar_list.getOrNull(6) as Number?)?.toLong()
+      val repeatCount = (pigeonVar_list.getOrNull(7) as Number?)?.toLong()
+      val repeatGapMs = (pigeonVar_list.getOrNull(8) as Number?)?.toLong()
+      val tag = pigeonVar_list.getOrNull(9) as String?
+      return NotificationSettingsWire(title, body, stopButton, icon,
+        snoozeButton, doneButton, snoozeMinutes, repeatCount, repeatGapMs, tag)
     }
   }
   fun toList(): List<Any?> {
@@ -257,6 +276,12 @@ data class NotificationSettingsWire (
       body,
       stopButton,
       icon,
+      snoozeButton,
+      doneButton,
+      snoozeMinutes,
+      repeatCount,
+      repeatGapMs,
+      tag,
     )
   }
 }

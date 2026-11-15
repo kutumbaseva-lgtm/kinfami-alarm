@@ -13,3 +13,12 @@ Changes (2026-11-15):
 3. `pubspec.yaml` version `4.1.1+kinfami.1`.
 
 No other code is changed. Not published to pub.dev.
+
+Changes (2026-11-15, second set — Reminders Stage 3/4):
+4. `NotificationSettings` (Dart + Android, incl. the generated bindings) gains optional `snoozeButton`, `doneButton`,
+   `snoozeMinutes`, `repeatCount`, `repeatGapMs`, `tag`. Without them the package behaves as 4.1.1.
+5. `AudioService.kt`: the sound plays `repeatCount` times with `repeatGapMs` in between; Stop/Done cancels the rest.
+6. `NotificationService.kt` / `AlarmReceiver.kt` / `AlarmService.kt`: Snooze and Done buttons on the alarm
+   notification. Snooze sets the same alarm again after `snoozeMinutes` under id `id | 0x40000000` (saved, so it
+   survives a reboot) — works with the app closed. Done stops the ring, cancels a pending snooze of it and appends
+   `tag|time` to SharedPreferences key `kinfami_alarm_done` for the app to apply.

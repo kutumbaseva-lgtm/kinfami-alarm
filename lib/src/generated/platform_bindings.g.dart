@@ -188,6 +188,12 @@ class NotificationSettingsWire {
     required this.body,
     this.stopButton,
     this.icon,
+    this.snoozeButton,
+    this.doneButton,
+    this.snoozeMinutes,
+    this.repeatCount,
+    this.repeatGapMs,
+    this.tag,
   });
 
   /// Title of the notification to be shown when alarm is triggered.
@@ -225,12 +231,36 @@ class NotificationSettingsWire {
   /// Defaults to `null`.
   String? icon;
 
+  /// KinFami fork: Snooze button text (null = no button).
+  String? snoozeButton;
+
+  /// KinFami fork: Done button text (null = no button).
+  String? doneButton;
+
+  /// KinFami fork: snooze length in minutes.
+  int? snoozeMinutes;
+
+  /// KinFami fork: how many times the sound plays (1–5).
+  int? repeatCount;
+
+  /// KinFami fork: pause between plays, in milliseconds.
+  int? repeatGapMs;
+
+  /// KinFami fork: app tag of the alarm (reminder id), reported back when Done is pressed.
+  String? tag;
+
   Object encode() {
     return <Object?>[
       title,
       body,
       stopButton,
       icon,
+      snoozeButton,
+      doneButton,
+      snoozeMinutes,
+      repeatCount,
+      repeatGapMs,
+      tag,
     ];
   }
 
@@ -241,6 +271,12 @@ class NotificationSettingsWire {
       body: result[1]! as String,
       stopButton: result[2] as String?,
       icon: result[3] as String?,
+      snoozeButton: result.length > 4 ? result[4] as String? : null,
+      doneButton: result.length > 5 ? result[5] as String? : null,
+      snoozeMinutes: result.length > 6 ? result[6] as int? : null,
+      repeatCount: result.length > 7 ? result[7] as int? : null,
+      repeatGapMs: result.length > 8 ? result[8] as int? : null,
+      tag: result.length > 9 ? result[9] as String? : null,
     );
   }
 }

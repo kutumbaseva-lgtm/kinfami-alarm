@@ -91,8 +91,30 @@ class NotificationHandler(private val context: Context) {
             if (it.stopButton != null) {
                 notificationBuilder.addAction(0, it.stopButton, stopPendingIntent)
             }
+            // KinFami fork: Snooze and Done buttons (own request codes per alarm, so the
+            // buttons of two alarms never share extras).
+            if (it.snoozeButton != null) {
+                notificationBuilder.addAction(0, it.snoozeButton, actionIntent(AlarmReceiver.ACTION_ALARM_SNOOZE, alarmId, 1))
+            }
+            if (it.doneButton != null) {
+                notificationBuilder.addAction(0, it.doneButton, actionIntent(AlarmReceiver.ACTION_ALARM_DONE, alarmId, 2))
+            }
         }
 
         return notificationBuilder.build()
+    }
+
+    // KinFami fork: a broadcast to AlarmReceiver carrying the alarm id.
+    private fun actionIntent(actionName: String, alarmId: Int, slot: Int): PendingIntent {
+        val intent = Intent(context, AlarmReceiver::class.java).apply {
+            action = actionName
+            putExtra("id", alarmId)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            (alarmId.toLong() * 4L + slot).hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 }
