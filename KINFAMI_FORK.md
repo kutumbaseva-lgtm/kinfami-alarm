@@ -35,3 +35,16 @@ Changes (2026-11-17, third set — Smart Reminders):
    vibration, no Stop button. `snoozeMinutes` null or 0 = no Snooze button.
 10. Alarm notification channel name "Alarm Notification" -> "Smart Reminders" (channel id unchanged).
 11. `pubspec.yaml` version `4.1.1+kinfami.2`. No new permissions. No Dart API change.
+
+Changes (2026-11-17, fourth set — auto-snooze):
+12. Auto-snooze: when an alarm starts ringing (alarm service or best-effort notification), its snooze is set at once
+    under the snooze id (`id | 0x40000000`), as if Snooze had been pressed. If nobody answers, it rings again after
+    `snoozeMinutes`, at most 3 times (`KinAlarmActions.MAX_AUTO_SNOOZES`; count in SharedPreferences
+    `kinfami_auto_<id>`, reset when the reminder's own alarm rings or a button is pressed). Snooze replaces it (same
+    id), Done and Stop cancel it. Snooze Off or no sound (`repeatCount` 0) = no auto-snooze. Native only, works with
+    the app closed; no Dart change (the app already shows it as "Snoozed until HH:MM").
+13. `AlarmService.kt`: "already ringing" is now worked out when an alarm starts (`AudioService.getActiveIds`: playing
+    or between plays). Before, an alarm left unanswered counted as ringing until the service stopped, so later alarms
+    — including its snooze — were dropped. An earlier unanswered ring of the same reminder is replaced by the new one.
+14. `KinAlarmActions.done`: Done on a snoozed alarm also cancels its own re-armed auto-snooze.
+15. `pubspec.yaml` version `4.1.1+kinfami.3`. No new permissions (still no `USE_EXACT_ALARM`). No Dart API change.

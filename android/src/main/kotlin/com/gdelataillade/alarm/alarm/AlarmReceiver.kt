@@ -46,8 +46,12 @@ class AlarmReceiver : BroadcastReceiver() {
             val saved = KinAlarmActions.savedAlarm(context, id)
             KinAlarmActions.forget(context, id)
             when (button) {
-                "SNOOZE_ALARM" -> KinAlarmActions.snooze(context, saved)
+                "SNOOZE_ALARM" -> {
+                    KinAlarmActions.resetAuto(context, id)
+                    KinAlarmActions.snooze(context, saved) // replaces a pending auto-snooze
+                }
                 "DONE_ALARM" -> KinAlarmActions.done(context, id, saved)
+                "STOP_ALARM" -> KinAlarmActions.cancelAutoSnooze(context, id)
             }
             return
         }

@@ -40,6 +40,10 @@ object KinAlarmActions {
 
     private const val PENDING_PREFIX = "flutter.kinfami_pending_"
 
+    /** Auto-snooze: how many times an unanswered alarm comes back by itself. */
+    const val MAX_AUTO_SNOOZES = 3
+    private const val AUTO_PREFIX = "flutter.kinfami_auto_"
+
     private fun prefs(context: Context) =
         context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
 
@@ -99,11 +103,73 @@ object KinAlarmActions {
         if (snoozeId != id) {
             AlarmApiImpl(context).stopAlarm(snoozeId.toLong())
             AlarmStorage(context).unsaveAlarm(snoozeId)
+        } else {
+            // Auto-snooze: a snoozed alarm re-arms itself under its own id while it rings;
+            // Done must cancel that too (without stopping the service, which handles Done).
+            cancelScheduled(context, snoozeId)
+            AlarmStorage(context).unsaveAlarm(snoozeId)
         }
+        resetAuto(context, id)
         val tag = saved?.notificationSettings?.tag ?: return
         val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val old = prefs.getString(DONE_KEY, "") ?: ""
         prefs.edit().putString(DONE_KEY, old + tag + "|" + System.currentTimeMillis() + "\n").apply()
+    }
+
+    // ------------------------------------------------------------------ auto-snooze
+    // KinFami fork (2026-11-17, auto-snooze): when an alarm starts ringing, its snooze is set
+    // right away, as if Snooze had been pressed. If nobody presses anything (asleep, phone in
+    // another room) it rings again after the snooze minutes, up to MAX_AUTO_SNOOZES times.
+    // Snooze replaces it (same id), Done and Stop cancel it. Everything is native, so it works
+    // with KinFami closed. Snooze Off or "Alarm sound" off = no auto-snooze.
+
+    /** Cancel the AlarmManager entry of [id] only (no service stop, storage untouched). */
+    fun cancelScheduled(context: Context, id: Int) {
+        try {
+            val pi = PendingIntent.getBroadcast(
+                context,
+                id,
+                Intent(context, AlarmReceiver::class.java),
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            ) ?: return
+            (context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager).cancel(pi)
+            pi.cancel()
+        } catch (e: Exception) {
+            Log.e("KinAlarmActions", "Could not cancel alarm $id", e)
+        }
+    }
+
+    /** Call when alarm [id] starts ringing (after [remember]). */
+    fun armAutoSnooze(context: Context, id: Int) {
+        val saved = savedAlarm(context, id) ?: return
+        val minutes = saved.notificationSettings.snoozeMinutes ?: return
+        if (minutes <= 0L || (saved.notificationSettings.repeatCount ?: 1L) <= 0L) return
+        val base = id and SNOOZE_BIT.inv()
+        val p = prefs(context)
+        // The reminder's own alarm starts a new count; a snoozed alarm continues it.
+        val count = if ((id and SNOOZE_BIT) == 0) 0 else p.getInt(AUTO_PREFIX + base, 0)
+        if (count >= MAX_AUTO_SNOOZES) {
+            p.edit().remove(AUTO_PREFIX + base).apply()
+            return
+        }
+        p.edit().putInt(AUTO_PREFIX + base, count + 1).apply()
+        snooze(context, saved)
+        Log.d("KinAlarmActions", "Alarm $id auto-snooze ${count + 1}/$MAX_AUTO_SNOOZES armed")
+    }
+
+    /** Stop: the user heard it — no automatic ring again. */
+    fun cancelAutoSnooze(context: Context, id: Int) {
+        val snoozeId = id or SNOOZE_BIT
+        cancelScheduled(context, snoozeId)
+        AlarmStorage(context).unsaveAlarm(snoozeId)
+        forgetPending(context, snoozeId)
+        resetAuto(context, id)
+        AlarmPlugin.alarmTriggerApi?.alarmStopped(snoozeId.toLong()) {}
+    }
+
+    /** Snooze / Done / Stop pressed: the next unanswered ring gets the full count again. */
+    fun resetAuto(context: Context, id: Int) {
+        prefs(context).edit().remove(AUTO_PREFIX + (id and SNOOZE_BIT.inv())).apply()
     }
 
     fun cancelNotification(context: Context, id: Int) {
@@ -155,6 +221,13 @@ object KinAlarmActions {
         val ns = notificationSettingsOf(intent)
         val silent = (ns.repeatCount ?: 1L) <= 0L
         remember(context, id)
+        // Auto-snooze: an unanswered earlier notification of the same reminder is replaced.
+        val base = id and SNOOZE_BIT.inv()
+        if (base != id) {
+            cancelNotification(context, base)
+            forgetPending(context, base)
+        }
+        armAutoSnooze(context, id)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(

@@ -30,6 +30,13 @@ class AudioService(private val context: Context) {
         return mediaPlayers.filter { (_, mediaPlayer) -> mediaPlayer.isPlaying }.keys.toList()
     }
 
+    /**
+     * KinFami fork (auto-snooze): alarms still ringing — playing now, or in the pause before
+     * their next play. An alarm whose plays are all finished is not ringing any more.
+     */
+    fun getActiveIds(): List<Int> =
+        (getPlayingMediaPlayersIds() + pendingRepeats.keys).distinct()
+
     fun playAudio(
         id: Int,
         filePath: String,

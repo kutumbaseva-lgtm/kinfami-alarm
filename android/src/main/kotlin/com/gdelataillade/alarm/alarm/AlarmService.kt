@@ -64,6 +64,7 @@ class AlarmService : Service() {
 
         if (action == "STOP_ALARM" && id != 0) {
             unsaveAlarm(id)
+            KinAlarmActions.cancelAutoSnooze(this, id) // heard it: no automatic ring again
             return START_NOT_STICKY
         }
 
@@ -77,7 +78,8 @@ class AlarmService : Service() {
             // Stop and forget the ringing alarm first: a snoozed alarm snoozed again keeps
             // the same id, so saving before this would be undone.
             unsaveAlarm(id)
-            KinAlarmActions.snooze(this, saved)
+            KinAlarmActions.resetAuto(this, id)
+            KinAlarmActions.snooze(this, saved) // replaces a pending auto-snooze (same id)
             return START_NOT_STICKY
         }
 
@@ -136,6 +138,23 @@ class AlarmService : Service() {
             return START_NOT_STICKY
         }
 
+        // KinFami fork (auto-snooze): an earlier ring of the same reminder that nobody answered
+        // is replaced by this one (its sound has ended; its notification and buttons go).
+        val base = id and SNOOZE_BIT.inv()
+        for (old in shownIds) {
+            if (old != id && (old and SNOOZE_BIT.inv()) == base) {
+                audioService?.stopAudio(old)
+                shownIds = shownIds - old
+                AlarmStorage(this).unsaveAlarm(old)
+                KinAlarmActions.forgetPending(this, old)
+                KinAlarmActions.cancelNotification(this, old)
+            }
+        }
+        // KinFami fork: "already ringing" means still playing (or between plays). Before, the
+        // list was only refreshed on start/stop, so an alarm left unanswered counted as ringing
+        // forever and every later alarm — including its snooze — was dropped.
+        ringingAlarmIds = audioService?.getActiveIds()?.filter { it != id } ?: listOf()
+
         // Check if an alarm is already ringing
         if (ringingAlarmIds.isNotEmpty() && action != "STOP_ALARM") {
             Log.d("AlarmService", "An alarm is already ringing. Ignoring new alarm with id: $id")
@@ -157,6 +176,7 @@ class AlarmService : Service() {
 
         shownIds = shownIds + id
         KinAlarmActions.remember(this, id)
+        KinAlarmActions.armAutoSnooze(this, id) // rings again if nobody answers
 
         // Notify the plugin about the alarm ringing
         AlarmPlugin.alarmTriggerApi?.alarmRang(id.toLong()) {
