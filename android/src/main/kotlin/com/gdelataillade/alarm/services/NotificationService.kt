@@ -11,11 +11,13 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.gdelataillade.alarm.alarm.AlarmReceiver
+import com.gdelataillade.alarm.alarm.KinAlarmActions
 
 class NotificationHandler(private val context: Context) {
     companion object {
         private const val CHANNEL_ID = "alarm_plugin_channel"
-        private const val CHANNEL_NAME = "Alarm Notification"
+        // KinFami fork (2026-11-17): the channel users see in Android settings.
+        private const val CHANNEL_NAME = "Smart Reminders"
     }
 
     init {
@@ -88,33 +90,22 @@ class NotificationHandler(private val context: Context) {
         }
 
         notificationSettings.let {
-            if (it.stopButton != null) {
+            // KinFami fork: no Stop button when the alarm has no sound (repeatCount 0).
+            if (it.stopButton != null && (it.repeatCount ?: 1L) > 0L) {
                 notificationBuilder.addAction(0, it.stopButton, stopPendingIntent)
             }
             // KinFami fork: Snooze and Done buttons (own request codes per alarm, so the
-            // buttons of two alarms never share extras).
-            if (it.snoozeButton != null) {
-                notificationBuilder.addAction(0, it.snoozeButton, actionIntent(AlarmReceiver.ACTION_ALARM_SNOOZE, alarmId, 1))
+            // buttons of two alarms never share extras). No Snooze when Snooze is off.
+            if (it.snoozeButton != null && (it.snoozeMinutes ?: 0L) > 0L) {
+                notificationBuilder.addAction(0, it.snoozeButton,
+                    KinAlarmActions.buttonIntent(context, AlarmReceiver.ACTION_ALARM_SNOOZE, alarmId, 1))
             }
             if (it.doneButton != null) {
-                notificationBuilder.addAction(0, it.doneButton, actionIntent(AlarmReceiver.ACTION_ALARM_DONE, alarmId, 2))
+                notificationBuilder.addAction(0, it.doneButton,
+                    KinAlarmActions.buttonIntent(context, AlarmReceiver.ACTION_ALARM_DONE, alarmId, 2))
             }
         }
 
         return notificationBuilder.build()
-    }
-
-    // KinFami fork: a broadcast to AlarmReceiver carrying the alarm id.
-    private fun actionIntent(actionName: String, alarmId: Int, slot: Int): PendingIntent {
-        val intent = Intent(context, AlarmReceiver::class.java).apply {
-            action = actionName
-            putExtra("id", alarmId)
-        }
-        return PendingIntent.getBroadcast(
-            context,
-            (alarmId.toLong() * 4L + slot).hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
     }
 }

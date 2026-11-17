@@ -22,3 +22,16 @@ Changes (2026-11-15, second set — Reminders Stage 3/4):
    notification. Snooze sets the same alarm again after `snoozeMinutes` under id `id | 0x40000000` (saved, so it
    survives a reboot) — works with the app closed. Done stops the ring, cancels a pending snooze of it and appends
    `tag|time` to SharedPreferences key `kinfami_alarm_done` for the app to apply.
+
+Changes (2026-11-17, third set — Smart Reminders):
+7. New `KinAlarmActions.kt`: Snooze / Done / Stop logic shared by the receiver and the service, and the best-effort
+   notification. `AlarmReceiver.kt` handles a button itself unless the alarm service shows that alarm (then a plain
+   `startService`). Before, every button started the service with `startForegroundService` without
+   `startForeground`, which Android 12+ answers by crashing the app process.
+8. Without "Alarms & reminders" (Android 12+), the alarm is shown as a normal high-priority notification (channel
+   "Smart Reminders", or "Smart Reminders (silent)") with Snooze and Done, instead of a foreground service that
+   Android does not allow from the background (the alarm used to disappear). It may come a few minutes late.
+9. `repeatCount` 0 = no sound (the app's "Alarm sound" switch is off): the notification is still shown, a short
+   vibration, no Stop button. `snoozeMinutes` null or 0 = no Snooze button.
+10. Alarm notification channel name "Alarm Notification" -> "Smart Reminders" (channel id unchanged).
+11. `pubspec.yaml` version `4.1.1+kinfami.2`. No new permissions. No Dart API change.

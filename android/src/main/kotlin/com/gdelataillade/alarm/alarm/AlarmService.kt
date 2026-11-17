@@ -34,10 +34,15 @@ class AlarmService : Service() {
         var ringingAlarmIds: List<Int> = listOf()
 
         // KinFami fork: snoozed alarms use the alarm id with this bit set.
-        const val SNOOZE_BIT = 0x40000000
+        const val SNOOZE_BIT = KinAlarmActions.SNOOZE_BIT
         // KinFami fork: "Done" notes for the app (read by Flutter's SharedPreferences as
         // key "kinfami_alarm_done").
-        const val DONE_KEY = "flutter.kinfami_alarm_done"
+        const val DONE_KEY = KinAlarmActions.DONE_KEY
+
+        // KinFami fork: alarms whose notification this service shows (ringing or silent).
+        // The receiver sends their buttons here; other buttons it handles itself.
+        @JvmStatic
+        var shownIds: Set<Int> = setOf()
     }
 
     override fun onCreate() {
@@ -65,40 +70,22 @@ class AlarmService : Service() {
         // KinFami fork: Snooze — stop this ring and set the same alarm again in N minutes
         // under the snooze id (id with bit 30 set), saved so it survives a reboot. Works
         // with the app closed (no Flutter needed).
+        // (2026-11-17: the receiver now reaches these with a plain startService, and only for
+        // alarms this service shows; shared logic in KinAlarmActions.)
         if (action == "SNOOZE_ALARM" && id != 0) {
-            val storage = AlarmStorage(this)
-            val saved = storage.getSavedAlarms().firstOrNull { it.id == id }
+            val saved = KinAlarmActions.savedAlarm(this, id)
             // Stop and forget the ringing alarm first: a snoozed alarm snoozed again keeps
             // the same id, so saving before this would be undone.
             unsaveAlarm(id)
-            if (saved != null) {
-                val minutes = (saved.notificationSettings.snoozeMinutes ?: 10L).coerceIn(1L, 120L)
-                val snoozed = saved.copy(
-                    id = id or SNOOZE_BIT,
-                    dateTime = Date(System.currentTimeMillis() + minutes * 60_000L)
-                )
-                storage.saveAlarm(snoozed)
-                AlarmApiImpl(this).setAlarm(snoozed)
-            }
+            KinAlarmActions.snooze(this, saved)
             return START_NOT_STICKY
         }
 
         // KinFami fork: Done — stop this ring, cancel a pending snooze of it, and leave a note
         // ("tag|time") for the app, which marks the reminder done the next time it runs.
         if (action == "DONE_ALARM" && id != 0) {
-            val storage = AlarmStorage(this)
-            val saved = storage.getSavedAlarms().firstOrNull { it.id == id }
-            val snoozeId = id or SNOOZE_BIT
-            if (snoozeId != id) {
-                AlarmApiImpl(this).stopAlarm(snoozeId.toLong())
-                storage.unsaveAlarm(snoozeId)
-            }
-            val tag = saved?.notificationSettings?.tag
-            if (tag != null) {
-                val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                val old = prefs.getString(DONE_KEY, "") ?: ""
-                prefs.edit().putString(DONE_KEY, old + tag + "|" + System.currentTimeMillis() + "\n").apply()
-            }
+            val saved = KinAlarmActions.savedAlarm(this, id)
+            KinAlarmActions.done(this, id, saved)
             unsaveAlarm(id)
             return START_NOT_STICKY
         }
@@ -168,40 +155,50 @@ class AlarmService : Service() {
         val volumeEnforced = intent.getBooleanExtra("volumeEnforced", false)
         val fadeDuration = intent.getDoubleExtra("fadeDuration", 0.0)
 
+        shownIds = shownIds + id
+        KinAlarmActions.remember(this, id)
+
         // Notify the plugin about the alarm ringing
         AlarmPlugin.alarmTriggerApi?.alarmRang(id.toLong()) {
             Log.d("AlarmService", "Flutter was notified that alarm $id is ringing.")
         }
 
-        // Set the volume if specified
-        if (volume in 0.0..1.0) {
-            volumeService?.setVolume(volume, volumeEnforced, showSystemUI)
-        }
-
-        // Request audio focus
-        volumeService?.requestAudioFocus()
-
-        // Set up audio completion listener
-        audioService?.setOnAudioCompleteListener {
-            if (!loopAudio) {
-                vibrationService?.stopVibrating()
-                volumeService?.restorePreviousVolume(showSystemUI)
-                volumeService?.abandonAudioFocus()
-            }
-        }
-
-        // Play the alarm audio
-        // KinFami fork: play the sound N times with a pause in between.
-        val repeatCount = (notificationSettings.repeatCount ?: 1L).toInt().coerceIn(1, 5)
+        // KinFami fork: play the sound N times with a pause in between; repeatCount 0 = the
+        // "Alarm sound" switch is off: no sound, only the notification (and vibration).
+        val repeatCount = (notificationSettings.repeatCount ?: 1L).toInt().coerceIn(0, 5)
         val repeatGapMs = (notificationSettings.repeatGapMs ?: 0L).coerceIn(0L, 60_000L)
-        audioService?.playAudio(id, assetAudioPath, loopAudio, fadeDuration, repeatCount, repeatGapMs)
+        if (repeatCount > 0) {
+            // Set the volume if specified
+            if (volume in 0.0..1.0) {
+                volumeService?.setVolume(volume, volumeEnforced, showSystemUI)
+            }
+
+            // Request audio focus
+            volumeService?.requestAudioFocus()
+
+            // Set up audio completion listener
+            audioService?.setOnAudioCompleteListener {
+                if (!loopAudio) {
+                    vibrationService?.stopVibrating()
+                    volumeService?.restorePreviousVolume(showSystemUI)
+                    volumeService?.abandonAudioFocus()
+                }
+            }
+
+            audioService?.playAudio(id, assetAudioPath, loopAudio, fadeDuration, repeatCount, repeatGapMs)
+        }
 
         // Update the list of ringing alarms
         ringingAlarmIds = audioService?.getPlayingMediaPlayersIds() ?: listOf()
 
         // Start vibration if enabled
         if (vibrate) {
-            vibrationService?.startVibrating(longArrayOf(0, 500, 500), 1)
+            if (repeatCount > 0) {
+                vibrationService?.startVibrating(longArrayOf(0, 500, 500), 1)
+            } else {
+                // No sound: a short vibration only (nothing would stop a repeating one).
+                vibrationService?.startVibrating(longArrayOf(0, 500, 300, 500), -1)
+            }
         }
 
         // Acquire a wake lock to wake up the device
@@ -226,6 +223,7 @@ class AlarmService : Service() {
 
     private fun unsaveAlarm(id: Int) {
         AlarmStorage(this).unsaveAlarm(id)
+        KinAlarmActions.forgetPending(this, id)
         AlarmPlugin.alarmTriggerApi?.alarmStopped(id.toLong()) {
             Log.d("AlarmService", "Flutter was notified that alarm $id was stopped.")
         }
@@ -233,6 +231,7 @@ class AlarmService : Service() {
     }
 
     private fun stopAlarm(id: Int) {
+        shownIds = shownIds - id
         AlarmRingingLiveData.instance.update(false)
         try {
             val playingIds = audioService?.getPlayingMediaPlayersIds() ?: listOf()
@@ -260,6 +259,7 @@ class AlarmService : Service() {
 
     override fun onDestroy() {
         ringingAlarmIds = listOf()
+        shownIds = setOf()
 
         audioService?.cleanUp()
         vibrationService?.stopVibrating()
